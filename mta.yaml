@@ -1,0 +1,181 @@
+_schema-version: "3.1"
+ID: OdataSaP
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: OdataSaP-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: OdataSaP-db
+  - name: uaa_OdataSaP
+  - name: OdataSaPBtp-destination-service
+  - name: LP_Connectivity
+  - name: OdataOfSap2-db
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    readiness-health-check-http-endpoint: /health
+    readiness-health-check-type: http
+  build-parameters:
+    builder: npm
+- name: OdataSaP-destination-content
+  type: com.sap.application.content
+  requires:
+  - name: OdataSaP-destination-service
+    parameters:
+      content-target: true
+  - name: OdataSaP_html_repo_host
+    parameters:
+      service-key:
+        name: OdataSaP_html_repo_host-key
+  - name: uaa_OdataSaP
+    parameters:
+      service-key:
+        name: uaa_OdataSaP-key
+  parameters:
+    content:
+      instance:
+        destinations:
+        - Name: OdataApprouter_OdataSaP_html_repo_host
+          ServiceInstanceName: OdataSaP-html5-app-host-service
+          ServiceKeyName: OdataSaP_html_repo_host-key
+          sap.cloud.service: OdataApprouter
+        - Authentication: OAuth2UserTokenExchange
+          Name: OdataApprouter_uaa_OdataSaP
+          ServiceInstanceName: OdataSaP-xsuaa-service
+          ServiceKeyName: uaa_OdataSaP-key
+          sap.cloud.service: OdataApprouter
+        existing_destinations_policy: ignore
+  build-parameters:
+    no-source: true
+- name: OdataSaP-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: OdataSaP_html_repo_host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - odatanewapp.zip
+      name: odatanewapp
+      target-path: resources/
+    - artifacts:
+      - postapp.zip
+      name: postapp
+      target-path: resources/
+- name: odatanewapp
+  type: html5
+  path: app/odatanewapp
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+- name: OdataOfSap2-db-deployer
+  type: hdb
+  path: gen/db
+  requires:
+  - name: OdataOfSap2-db
+  parameters:
+    buildpack: nodejs_buildpack
+- name: postapp
+  type: html5
+  path: app/postapp
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: OdataSaP-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: true
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          - Authentication: NoAuthentication
+            HTML5.DynamicDestination: true
+            HTML5.ForwardAuthToken: true
+            Name: OdataSaP-srv-api
+            ProxyType: Internet
+            Type: HTTP
+            URL: ~{srv-api/srv-url}
+          existing_destinations_policy: update
+      version: 1.0.0
+    service: destination
+    service-name: OdataSaP-destination-service
+    service-plan: lite
+  requires:
+  - name: srv-api
+- name: OdataSaPBtp-destination-service
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: false
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          existing_destinations_policy: update
+    service: destination
+    service-name: OdataSaP-destination-service
+    service-plan: lite
+- name: OdataSaP_html_repo_host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: OdataSaP-html5-app-host-service
+    service-plan: app-host
+- name: LP_Connectivity
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: connectivity
+    service-plan: lite
+- name: uaa_OdataSaP
+  type: org.cloudfoundry.managed-service
+  parameters:
+    path: ./xs-security.json
+    service: xsuaa
+    service-name: OdataSaP-xsuaa-service
+    service-plan: application
+- name: OdataSaP-db
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: service-manager
+    service-plan: container
+- name: OdataOfSap2-db
+  type: com.sap.xs.hdi-container
+  parameters:
+    service: hana
+    service-plan: hdi-shared
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production
